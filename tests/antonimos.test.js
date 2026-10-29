@@ -1,0 +1,71 @@
+const A = require(require('path').join(__dirname, '..', 'src', 'engine.js'));
+const cases = [
+  ['Alta incidencia de enfermedades infecciosas en la localidad X', 'Baja incidencia de enfermedades infecciosas en la localidad X'],
+  ['Menores ingresos', 'Mayores ingresos'],
+  ['Baja calificación laboral', 'Alta calificación laboral'],
+  ['Menor logro educativo', 'Mayor logro educativo'],
+  ['Mayor inasistencia y repitencia escolar', 'Menor inasistencia y repitencia escolar'],
+  ['Menor productividad', 'Mayor productividad'],
+  ['Aumento de costos por ausentismo', 'Reducción de costos por ausentismo'],
+  ['Mayor Ausentismo laboral', 'Menor Ausentismo laboral'],
+  ['Postergación de otras necesidades', 'Priorización de otras necesidades'],
+  ['Mayores gastos de los hogares en salud', 'Menores gastos de los hogares en salud'],
+  ['Malos hábitos de higiene', 'Buenos hábitos de higiene'],
+  ['Insuficiente educación en higiene', 'Suficiente educación en higiene'],
+  ['Atención de salud insuficiente y/o tardía', 'Atención de salud suficiente y/u oportuna'],
+  ['Deficiente acceso a centros de salud', 'Suficiente acceso a centros de salud'],
+  ['Vías de acceso deficientes/inseguras', 'Vías de acceso suficientes/seguras'],
+  ['No hay atención de salud en la localidad', 'Hay atención de salud en la localidad'],
+  ['Medioambiente contaminado e insalubre', 'Medioambiente no contaminado y salubre'],
+  ['Inadecuada disposición de aguas servidas', 'Adecuada disposición de aguas servidas'],
+  ['Mal manejo de residuos sólidos', 'Buen manejo de residuos sólidos'],
+  ['Alta tasa de accidentes de tránsito en el sector Cuesta El Mirador', 'Baja tasa de accidentes de tránsito en el sector Cuesta El Mirador'],
+  ['Mayor número de viviendas en mal estado', 'Menor número de viviendas en mal estado'],
+  ['Bajo nivel de ingresos y alto desempleo', 'Alto nivel de ingresos y bajo desempleo'],
+  ['Escasa e inadecuada infraestructura', 'Suficiente y adecuada infraestructura'],
+  ['Viviendas sin acceso a agua potable', 'Viviendas con acceso a agua potable'],
+  ['Caminos mal mantenidos', 'Caminos bien mantenidos'],
+  ['Pocas áreas verdes', 'Suficientes áreas verdes'],
+  ['Servicio poco eficiente', 'Servicio eficiente'],
+  ['Instalaciones deterioradas o fuera de norma', 'Instalaciones en buen estado o dentro de norma'],
+  ['Carencia de profesionales de salud', 'Suficiencia de profesionales de salud'],
+  ['El aumento de la delincuencia', 'La reducción de la delincuencia'],
+  ['Insuficiente atención a adultos mayores', 'Suficiente atención a adultos mayores'],
+  ['Adultos mayores con baja cobertura de cuidados', 'Adultos mayores con alta cobertura de cuidados'],
+  ['Alta contaminación en Alto Hospicio', 'Baja contaminación en Alto Hospicio'],
+  ['Accidentes de tránsito frecuentes', 'Accidentes de tránsito poco frecuentes'],
+  ['Enfermedades respiratorias en niños', 'Disminución de enfermedades respiratorias en niños'],
+  ['Pobre calidad del agua', 'Buena calidad del agua'],
+  ['Infraestructura deteriorada e insuficiente', 'Infraestructura en buen estado y suficiente'],
+  ['Largos tiempos de espera en el CESFAM', 'Cortos tiempos de espera en el CESFAM'],
+  ['Hace falta una posta', 'Existe una posta'],
+  ['Déficit de cobertura de agua potable', 'Suficiencia de cobertura de agua potable'],
+  ['Pérdidas económicas de los agricultores', 'Menores pérdidas económicas de los agricultores'],
+  ['Mayor inasistencia y deserción escolar', 'Menor inasistencia y deserción escolar'],
+  ['Carencia y deterioro de equipos', 'Suficiencia y buen estado de equipos'],
+  ['Calles oscuras e inseguras', 'Calles iluminadas y seguras'],
+  ['Usuarios no atendidos oportunamente', 'Usuarios atendidos oportunamente'],
+  ['Elevados costos de traslado', 'Bajos costos de traslado'],
+  ['Difícil acceso al centro de salud', 'Fácil acceso al centro de salud'],
+  ['Hacinamiento en las salas de clases', 'Espacio suficiente en las salas de clases'],
+  ['Deficiencias en la gestión municipal', 'Suficiencia en la gestión municipal'],
+  ['Viviendas bajo el estándar mínimo', 'Viviendas sobre el estándar mínimo'],
+  ['Falta de mantención de caminos en mal estado', 'Disponibilidad de mantención de caminos en mal estado'],
+  ['Gran cantidad de microbasurales', 'Menor cantidad de microbasurales'],
+  ['Calzada angosta y con curvas sin señalizar', 'Calzada amplia y con curvas señalizadas'],
+  ['Viviendas sin regularizar', 'Viviendas regularizadas'],
+  ['Terrenos sin urbanizar en la comuna', 'Terrenos urbanizados en la comuna'],
+  ['Alta tasa de viviendas sin agua potable', 'Baja tasa de viviendas sin agua potable'],
+  ['Hogares sin conexión a la red', 'Hogares con conexión a la red'],
+  ['alta incidencia sin tilde: disminucion', 'baja incidencia sin tilde: disminucion'],
+];
+let fail = 0;
+for (const [inp, exp] of cases) {
+  const r = A.convert(inp);
+  const ok = r.text === exp;
+  if (!ok) fail++;
+  console.log((ok ? 'OK  ' : 'FAIL') + ' | ' + inp + '\n       → ' + r.text + (ok ? '' : '\n   esperado ' + exp) + (r.variants.length ? '\n       alts: ' + r.variants.join(' | ') : '') + ' [' + r.status + ']' + (r.segments.map(s => s.t).join('') !== r.text ? '  !!SEGMENTS MISMATCH: ' + JSON.stringify(r.segments) : ''));
+}
+console.log('\n' + (cases.length - fail) + '/' + cases.length + ' OK');
+
+if (fail) process.exit(1);
