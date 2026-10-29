@@ -271,7 +271,14 @@ const touches = new Map();
 const caps = { inViewer: !!(window.claude && window.claude.use), downloads: null, sample: null };
 const LS_KEY = 'arbol-pyep-diagrama-v1', LS_OLD = 'arbol-pyep-proyecto-v1';
 // Trabajo en grupo en vivo fuera de Claude (GitHub Pages): pegar aquí la configuración web de un proyecto de Firebase (ver README).
-const FIREBASE = null;
+const FIREBASE = {
+  apiKey: 'AIzaSyDoiZt4ExEjOn98nuRlkrMBHGn0_w3QKj0',
+  authDomain: 'arbol-pyep.firebaseapp.com',
+  projectId: 'arbol-pyep',
+  storageBucket: 'arbol-pyep.firebasestorage.app',
+  messagingSenderId: '372126917549',
+  appId: '1:372126917549:web:0569116d9e3f185262f724',
+};
 const FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 const PUBLIC_URL = 'https://mhylos.github.io/arbol-problemas-pyep/';
 const svg = $('#canvas'), stage = $('#stage');
