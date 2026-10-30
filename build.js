@@ -6,10 +6,14 @@ const path = require('path');
 const dir = __dirname;
 const read = f => fs.readFileSync(path.join(dir, 'src', f), 'utf8');
 const shell = read('shell.html');
+// El script de Google Slides (src/slides.gs) va dentro de la app como texto, para copiarlo desde el diálogo.
+// Se escapa "</" como "<\/" para que su "</script>" no cierre la etiqueta <script> de la página.
+const slidesGs = JSON.stringify(read('slides.gs')).replace(/<\//g, '<\\/');
+const app = read('diagrama.js').replace("/*SLIDES_GS*/''", () => slidesGs);
+if (/<\/script/i.test(read('engine.js') + app)) throw new Error('</script> dentro del JS');
 const page = shell
   .replace('/*ENGINE*/', () => read('engine.js'))
-  .replace('/*APP*/', () => read('diagrama.js'));
-if (/<\/script/i.test(read('engine.js') + read('diagrama.js'))) throw new Error('</script> dentro del JS');
+  .replace('/*APP*/', () => app);
 fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(dir, 'dist', 'arbol-problemas.html'), page);
 const cut = page.indexOf('<div class="app">');

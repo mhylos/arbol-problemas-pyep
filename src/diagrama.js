@@ -36,8 +36,6 @@ const ICON = {
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   box: '<rect x="4" y="7" width="16" height="10" rx="1.5"/>',
   book: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5"/>',
-  wand: '<path d="M4 20l10-10"/><path d="M15 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/><path d="M19.5 11l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/>',
-  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14a6.5 6.5 0 0 1 3.5 6"/>',
 };
 function icon(name) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -171,6 +169,22 @@ function roles(p) {
     }
   };
   walk(out, 'efecto'); walk(inc, 'causa');
+  // Un cuadro con varias flechas de llegada se ubica sobre la más lejana (camino más largo),
+  // así el fin último queda arriba de todo y la causa más profunda abajo de todo.
+  for (const [map, r] of [[out, 'efecto'], [inc, 'causa']]) {
+    const depth = new Map([[central.id, 0]]);
+    for (const id of order) if (role.get(id) === r) depth.set(id, 0);
+    for (let pass = 0; pass < order.length; pass++) {
+      let changed = false;
+      for (const u of [central.id].concat(order.filter(id => role.get(id) === r))) {
+        for (const v of (map.get(u) || [])) {
+          if (role.get(v) !== r || !depth.has(u)) continue;
+          if (depth.get(u) + 1 > depth.get(v)) { depth.set(v, depth.get(u) + 1); parent.set(v, u); changed = true; }
+        }
+      }
+      if (!changed) break;
+    }
+  }
   return { role, parent, order, central };
 }
 
@@ -270,17 +284,6 @@ let drag = null, editing = null, spaceDown = false, menuOpen = false, rafPending
 const touches = new Map();
 const caps = { inViewer: !!(window.claude && window.claude.use), downloads: null, sample: null };
 const LS_KEY = 'arbol-pyep-diagrama-v1', LS_OLD = 'arbol-pyep-proyecto-v1';
-// Trabajo en grupo en vivo fuera de Claude (GitHub Pages): pegar aquí la configuración web de un proyecto de Firebase (ver README).
-const FIREBASE = {
-  apiKey: 'AIzaSyDoiZt4ExEjOn98nuRlkrMBHGn0_w3QKj0',
-  authDomain: 'arbol-pyep.firebaseapp.com',
-  projectId: 'arbol-pyep',
-  storageBucket: 'arbol-pyep.firebasestorage.app',
-  messagingSenderId: '372126917549',
-  appId: '1:372126917549:web:0569116d9e3f185262f724',
-};
-const FB_SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
-const PUBLIC_URL = 'https://mhylos.github.io/arbol-problemas-pyep/';
 const svg = $('#canvas'), stage = $('#stage');
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
@@ -327,8 +330,8 @@ const Sync = {
   },
   onError(e) {
     const code = e && e.code;
-    if (code === 'invalid_argument' || code === 'not_granted' || code === 'revoked' || code === 'permission-denied') { setReadOnly(true); return; }
-    if (code === 'quota_exceeded' || code === 'resource-exhausted') toast('El proyecto compartido llegó a su límite de tamaño.');
+    if (code === 'invalid_argument' || code === 'not_granted' || code === 'revoked') { setReadOnly(true); return; }
+    if (code === 'quota_exceeded') toast('El proyecto compartido llegó a su límite de tamaño.');
     setSyncState('error');
   },
 };
@@ -336,17 +339,16 @@ const saveLocalSoon = debounce(() => { if (Sync.mode === 'local') setSyncState(l
 const touch = (c, id) => Sync.touch(c, id);
 function setSyncState(s) { Sync.state = s; paintDot(); }
 function setReadOnly(v) { Sync.ro = v; document.body.classList.toggle('ro', v); paintDot(); render(); }
-// seed: diagrama que se sube si el proyecto compartido está vacío (null = no subir nada; sin indicar = el de este navegador)
-function startShared(db, canWrite, seed) {
+function startShared(db, canWrite) {
   Sync.mode = 'shared'; Sync.db = db; Sync.ready = false;
   P = emptyProject(); render();
   let left = COLLS.length + 1;
   const first = () => {
     if (--left > 0) return;
     Sync.ready = true; setSyncState('saved');
-    if (!Object.keys(P.cuadros).length && canWrite !== false && seed !== null) {
-      const local = seed || loadLocal();
-      const useLocal = !!(local && (seed || Object.keys(local.cuadros).length > 1 && !local.meta.ejemplo));
+    if (!Object.keys(P.cuadros).length && canWrite !== false) {
+      const local = loadLocal();
+      const useLocal = !!(local && Object.keys(local.cuadros).length > 1 && !local.meta.ejemplo);
       replaceProject(useLocal ? local : freshProject(), { noSnap: true });
       if (useLocal) toast('Se subió al proyecto compartido el diagrama que tenían en este navegador.');
     }
@@ -372,29 +374,6 @@ function startShared(db, canWrite, seed) {
     if (mf) { mf = false; first(); } else remote();
   }, err => Sync.onError(err));
   setTimeout(() => { if (!Sync.ready) { Sync.ready = true; render(); } }, 8000);
-}
-
-/* ---------- grupo en vivo con Firebase: la sala va en el enlace (#sala=…) y hace de contraseña ---------- */
-const roomId = () => (location.hash.match(/^#sala=([\w-]{16,64})$/) || [])[1];
-const roomLink = () => (/^https?:$/.test(location.protocol) ? location.href.split('#')[0] : PUBLIC_URL) + location.hash;
-async function joinRoom(sala, upload) {
-  Sync.ready = false; render();
-  try { await loadScript(FB_SDK + 'firebase-app-compat.js'); await loadScript(FB_SDK + 'firebase-firestore-compat.js'); }
-  catch (e) { Sync.ready = true; render(); toast('No se pudo conectar con el grupo (se necesita internet). Por ahora se guarda solo en este navegador.'); return; }
-  const fs = firebase.initializeApp(FIREBASE).firestore(), base = 'salas/' + sala + '/';
-  // solo quien crea la sala sube su diagrama: quien se une a una sala aún vacía espera a que llegue
-  startShared({ collection: c => fs.collection(base + c), doc: k => fs.doc(base + k) }, true, upload ? clone(P) : null);
-}
-async function copyRoomLink() { if (await copyText(roomLink())) toast('Enlace copiado. Envíenlo al grupo: quien lo abra edita este mismo diagrama en vivo.'); }
-function createRoom() {
-  history.replaceState(null, '', '#sala=' + b64url(crypto.getRandomValues(new Uint8Array(16))));
-  copyRoomLink();
-  joinRoom(roomId(), true);
-}
-function leaveRoom() {
-  if (Sync.state === 'saving') { toast('Esperen a que se guarde el último cambio.'); return; }
-  history.replaceState(null, '', location.pathname + location.search);
-  location.reload();
 }
 
 /* ---------- deshacer: solo lo que cambió cada persona ---------- */
@@ -847,7 +826,6 @@ function buildBar() {
     h('div', { class: 'tools' },
       tb('Cuadro', 'plus', addBox, { cls: 'w', id: 'add-btn', title: 'Agregar un cuadro' }),
       tb('Ordenar', 'tidy', doTidy, { cls: 'w', title: 'Ordenar el árbol automáticamente' }),
-      tb('Mejorar con IA', 'wand', improveDialog, { cls: 'ai w', title: 'Mejorar el árbol de problemas con una IA, según las guías del SNI y lo que ustedes le pidan' }),
       tb('Transformar con IA', 'spark', aiDialog, { cls: 'ai w', title: 'Transformar el árbol de problemas en objetivos con una IA (ChatGPT, Claude, Gemini)' }),
       h('span', { class: 'sep' }),
       tb('Editar', 'edit', () => { if (sel.nodes.size === 1) startEdit(Array.from(sel.nodes)[0]); }, { cls: 'w', id: 'edit-btn', title: 'Editar el texto (doble clic o Enter)' }),
@@ -953,13 +931,11 @@ function openMenu() {
     item('image', 'Imagen del árbol de problemas (PNG)', () => exportPNG('p')),
     item('image', 'Imagen del árbol de objetivos (PNG)', () => exportPNG('o')),
     item('slides', 'Presentación editable (PowerPoint)', exportPPTX),
+    item('slides', 'Copiar para Google Slides (editable)', slidesDialog),
     h('hr'),
     item('download', 'Guardar proyecto (.json)', exportJSON),
     item('upload', 'Abrir proyecto o pegar código', importDialog, 'w'),
-    item('copy', 'Copiar código para compartir', copyShareCode),
-    FIREBASE && !caps.inViewer && (Sync.mode === 'shared'
-      ? [h('hr'), item('users', 'Copiar enlace del grupo', copyRoomLink), item('x', 'Salir del grupo (volver a este navegador)', leaveRoom)]
-      : Sync.ready && [h('hr'), item('users', 'Trabajar en grupo en vivo', createRoom, 'w')]));
+    item('copy', 'Copiar código para compartir', copyShareCode));
   $('#file-btn').parentNode.append(m);
 }
 
@@ -1010,10 +986,10 @@ async function exportPNG(v) {
     await saveFile((v === 'p' ? 'arbol-de-problemas-' : 'arbol-de-objetivos-') + slug(P.meta.titulo) + '.png', blob, 'image/png');
   } catch (e) { console.error(e); toast('No se pudo generar la imagen.'); }
 }
-function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('script')); document.head.append(s); }); }
+function loadScript(src) { return new Promise((res, rej) => { if (window.PptxGenJS) return res(); const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('script')); document.head.append(s); }); }
 async function exportPPTX() {
   toast('Preparando la presentación…');
-  try { if (!window.PptxGenJS) await loadScript('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js'); }
+  try { await loadScript('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js'); }
   catch (e) { toast('No se pudo cargar el generador de PowerPoint (se necesita internet). Usen las imágenes PNG.'); return; }
   try {
     const pptx = new window.PptxGenJS(), FONT = 'Calibri', X = c => c.replace('#', ''), pal = EXPORT_PAL;
@@ -1091,9 +1067,48 @@ function importDialog() {
 }
 
 /* ============================================================
+   Google Slides: la app copia un código y un script de la presentación dibuja formas nativas
+   ============================================================ */
+const SLIDES_GS = /*SLIDES_GS*/'';
+function slidesCode() {
+  const arboles = ['p', 'o'].map(v => {
+    const G = buildG(v), b = bbox(G);
+    const cajas = Array.from(G.values()).map(g => {
+      const st = nodeStyle(g, v, EXPORT_PAL, true);
+      return { id: g.id, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), t: displayText(g.n, v), fill: st.fill, stroke: st.stroke, ink: st.ink, size: g.central ? RFS : FS };
+    });
+    const flechas = visibleEdges(G).map(e => {
+      const act = G.get(e.de).n.tipo === 'accion' || G.get(e.a).n.tipo === 'accion';
+      return { de: e.de, a: e.a, color: act ? EXPORT_PAL.acStroke : EXPORT_PAL.edge, dash: act };
+    });
+    return { titulo: (v === 'p' ? 'Árbol de problemas' : 'Árbol de objetivos') + (P.meta.titulo ? ' · ' + P.meta.titulo : ''), bbox: { x: b.x, y: b.y, w: b.w, h: b.h }, cajas, flechas };
+  });
+  return 'ARBOL-SLIDES:' + JSON.stringify({ v: 1, arboles });
+}
+function slidesDialog() {
+  commitEdit();
+  if (!Object.values(P.cuadros).some(n => n.texto.trim())) { toast('Primero escriban el árbol de problemas.'); return; }
+  const step = (n, t) => h('h3', null, h('span', { class: 'n' }, n), t);
+  modal('Copiar para Google Slides', [
+    h('p', { class: 'hint' }, 'Google Slides no acepta formas pegadas desde otra página, solo imágenes. Por eso un pequeño script dentro de su presentación dibuja los dos árboles con rectángulos y conectores de Slides, que se pueden mover y editar como cualquier forma.'),
+    step('1', 'Solo la primera vez: instalen el script en su presentación'),
+    h('ul', { class: 'hint' },
+      h('li', null, 'En Google Slides: Extensiones → Apps Script.'),
+      h('li', null, 'Borren lo que haya, peguen el script y guarden (Ctrl+S).'),
+      h('li', null, 'Vuelvan a la presentación y recárguenla: aparece el menú «Árbol PYEP». La primera vez Google pide autorizar el script (es de ustedes y solo trabaja en esa presentación).')),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: async () => { if (await copyText(SLIDES_GS)) toast('Script copiado. Péguenlo en Extensiones → Apps Script.'); } }, icon('copy'), 'Copiar script de instalación')),
+    step('2', 'Copien los árboles'),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onclick: async () => { if (await copyText(slidesCode())) toast('Árboles copiados. En Slides: Árbol PYEP → Pegar árbol…'); } }, icon('copy'), 'Copiar árboles')),
+    step('3', 'En Google Slides: Árbol PYEP → Pegar árbol…'),
+    h('p', { class: 'hint' }, 'Peguen con Ctrl+V y presionen «Insertar diapositivas». Se agregan dos diapositivas al final: árbol de problemas y árbol de objetivos.'),
+    h('p', { class: 'hint' }, 'Sin instalar nada: Archivo → Presentación editable (PowerPoint), y en Google Slides, Archivo → Importar diapositivas.')],
+    close => [h('button', { type: 'button', class: 'btn', onclick: close }, 'Cerrar')]);
+}
+
+/* ============================================================
    Transformar con IA (sin claves: copiar el pedido y pegar la respuesta)
    ============================================================ */
-function treeText() {
+function aiPrompt() {
   const { role, parent, order } = roles(P);
   const lines = [];
   for (const id of order) {
@@ -1104,10 +1119,6 @@ function treeText() {
   }
   for (const n of Object.values(P.cuadros)) if (n.tipo === 'normal' && !role.has(n.id) && n.texto.trim()) lines.push(n.id + ' | sin conectar | ' + n.texto);
   const links = Object.values(P.flechas).filter(e => role.has(e.de) && role.has(e.a) && parent.get(e.a) !== e.de && parent.get(e.de) !== e.a).map(e => e.de + ' también provoca ' + e.a);
-  return { order, empty: !lines.length, text: 'Árbol de problemas (cada línea: id | tipo | enunciado | relación):\n' + lines.join('\n') + (links.length ? '\nOtras relaciones: ' + links.join('; ') : '') };
-}
-function aiPrompt() {
-  const { order, text } = treeText();
   return 'Eres tutor del curso de Preparación y Evaluación de Proyectos (PYEP) del Sistema Nacional de Inversiones de Chile.\n'
     + 'Tengo un árbol de problemas y necesito el árbol de objetivos. Reglas:\n'
     + '- Cada enunciado negativo se transforma en la situación positiva deseada (su contrario): el problema central pasa a objetivo central, los efectos a fines y las causas a medios.\n'
@@ -1115,7 +1126,7 @@ function aiPrompt() {
     + '- No escribas soluciones ni acciones (nada de "construir" o "implementar"): describe la situación ya lograda.\n'
     + '- Enunciados breves, en español de Chile.\n'
     + '- Si ves enunciados mal planteados en el árbol de problemas (la "falta de" una solución, efectos demasiado abstractos, relaciones causa-efecto que no se sostienen o repeticiones), anótalos en "observaciones" de forma breve.\n\n'
-    + text + '\n\n'
+    + 'Árbol de problemas (cada línea: id | tipo | enunciado | relación):\n' + lines.join('\n') + (links.length ? '\nOtras relaciones: ' + links.join('; ') : '') + '\n\n'
     + 'Responde SOLO con un JSON válido, sin texto antes ni después, con este formato exacto y un objeto por cada id:\n'
     + '{"objetivos": [{"id": "' + (order[0] || 'id') + '", "objetivo": "texto positivo"}], "observaciones": ["..."]}';
 }
@@ -1150,139 +1161,45 @@ function applyAI(res) {
   if (res.obs.length) modal('Observaciones de la IA', [h('p', { class: 'hint' }, 'Sobre el árbol de problemas. Revísenlas en grupo: son sugerencias, no verdades.'), h('ul', null, res.obs.map(o => h('li', null, o)))], close => [h('button', { type: 'button', class: 'btn primary', onclick: close }, 'Entendido')]);
   return true;
 }
-// Diálogo común: copiar el pedido a una IA y pegar su respuesta, o pedírsela a Claude dentro del Artifact.
-// o.summary(res) devuelve el texto de lo reconocido, o null si la respuesta no sirve.
-function aiModal(o) {
-  const step = (n, t) => h('h3', null, h('span', { class: 'n' }, String(n)), t), k = o.before ? 1 : 0;
-  const promptBox = h('textarea', { class: 'ta short', value: o.prompt(), readOnly: true, 'aria-label': 'Pedido para la IA', onfocus: e => e.target.select() });
-  if (o.before) o.before.addEventListener('input', () => { promptBox.value = o.prompt(); });
-  const answer = h('textarea', { class: 'ta', placeholder: 'Peguen aquí la respuesta completa de la IA', 'aria-label': 'Respuesta de la IA' });
-  const info = h('div', { class: 'hint' });
-  const apply = h('button', { type: 'button', class: 'btn primary', disabled: true }, o.applyLabel);
-  let parsed = null;
-  answer.addEventListener('input', debounce(() => {
-    const res = o.read(answer.value), msg = res && o.summary(res);
-    parsed = msg ? res : null;
-    if (!answer.value.trim()) { info.textContent = ''; apply.disabled = true; return; }
-    info.textContent = msg || o.bad; info.className = msg ? 'hint ok-t' : 'hint bad-t'; apply.disabled = !msg;
-  }, 200));
-  const directBtn = caps.sample ? h('button', { type: 'button', class: 'btn' }, icon('spark'), h('span', null, o.directLabel)) : null;
-  modal(o.title, [
-    h('p', { class: 'hint' }, o.intro),
-    o.before,
-    step(k + 1, 'Copien el pedido y péguenlo en el chat de la IA'),
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onclick: async () => { if (await copyText(o.prompt())) toast('Pedido copiado. Péguenlo en ChatGPT, Claude o Gemini.'); } }, icon('copy'), 'Copiar pedido'),
-      h('a', { href: 'https://chatgpt.com/', target: '_blank', rel: 'noopener', class: 'hint' }, 'chatgpt.com'), h('a', { href: 'https://claude.ai/new', target: '_blank', rel: 'noopener', class: 'hint' }, 'claude.ai'), h('a', { href: 'https://gemini.google.com/', target: '_blank', rel: 'noopener', class: 'hint' }, 'gemini.google.com')),
-    promptBox,
-    step(k + 2, 'Peguen aquí la respuesta'),
-    answer, info,
-    directBtn ? h('div', { class: 'row' }, h('span', { class: 'hint' }, 'O háganlo aquí mismo, con su cuenta de Claude:'), directBtn) : null], close => {
-    apply.onclick = () => { if (!parsed) return; close(); o.apply(parsed); };
-    if (directBtn) directBtn.onclick = async () => {
-      directBtn.disabled = true; directBtn.lastChild.textContent = 'Pensando…';
-      try {
-        const res = o.read(JSON.stringify(await caps.sample.json(o.prompt(), { modelTier: 'default' })));
-        if (res && o.summary(res)) { close(); o.apply(res); } else toast(o.empty);
-      } catch (e) {
-        if (e && ['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed'].indexOf(e.code) > -1) caps.sample = null;
-        toast(e && e.code === 'rate_limited' ? 'Demasiadas consultas seguidas; esperen un momento.' : 'No se pudo consultar a Claude aquí. Usen el método de copiar y pegar.');
-      } finally { directBtn.disabled = false; directBtn.lastChild.textContent = o.directLabel; }
-    };
-    return [h('button', { type: 'button', class: 'btn', onclick: close }, 'Cancelar'), apply];
-  });
-}
 function aiDialog() {
   commitEdit();
   const count = Object.values(P.cuadros).filter(n => n.tipo !== 'accion' && n.texto.trim()).length;
   if (!count) { toast('Primero escriban el árbol de problemas.'); return; }
-  aiModal({
-    title: 'Transformar con IA', directLabel: 'Transformar aquí con Claude', applyLabel: 'Aplicar al árbol de objetivos',
-    intro: 'Funciona con ChatGPT, Claude o Gemini en su versión gratuita, sin claves ni configuración. La IA devuelve los objetivos en un formato que esta herramienta lee sola.',
-    prompt: aiPrompt, read: readAIAnswer, apply: applyAI,
-    summary: r => r.map.size ? 'Se reconocieron ' + r.map.size + ' de ' + count + ' objetivos' + (r.obs.length ? ' y ' + r.obs.length + ' observaciones' : '') + '.' : null,
-    bad: 'No se encontró el JSON con los objetivos. Copien la respuesta completa de la IA.',
-    empty: 'La respuesta no trajo objetivos. Intenten de nuevo.',
-  });
-}
-
-/* ---------- mejorar el árbol de problemas con una instrucción, según las guías del SNI ---------- */
-// Resumen de: Metodología General de Formulación y Evaluación de Proyectos de Inversión Pública (MDSF, 2025, cap. II.2)
-// y Metodología de Edificación Pública (MDSF, 2024).
-const GUIAS_SNI = [
-  'Problema: estado negativo que afecta a una población o grupo de usuarios respecto de un bien o servicio, una condición de riesgo o una oportunidad desaprovechada. Nunca la «ausencia de una solución» («falta un edificio», «inexistencia de oficinas»): eso es solo una de las alternativas de solución y sesga el análisis.',
-  'En proyectos de inversión el problema central suele ser de cobertura insuficiente (las instalaciones no existen o su capacidad no alcanza para la demanda) o de calidad deficiente (el servicio no cumple los estándares por causas de infraestructura, equipos o equipamiento). Hay un solo problema central: el que origina la idea de proyecto.',
-  'Efectos: consecuencias presentes y futuras del problema sobre la población o los usuarios, que se puedan respaldar con evidencia. Muestran la relevancia del problema y anticipan los beneficios de resolverlo.',
-  'Causas: explican el origen del problema y permiten proponer alternativas de solución. Cada causa debe sostenerse como causa real de lo que provoca; sin repeticiones.',
-  'Redacción: frases breves y simples, medibles cuando se pueda; cuando corresponda, a quién afecta y dónde.',
-  'Edificación pública (edificios institucionales): la finalidad es elevar el nivel de servicio a la comunidad aprovechando la infraestructura. Causas típicas: superficie insuficiente para la dotación de funcionarios según estándares, dependencias dispersas en varios inmuebles, deterioro o incumplimiento de normas de construcción y funcionamiento, distribución interna inadecuada. Efectos típicos: mayores costos de operación, conservación, reparación y arriendo; menor eficiencia del personal por desplazamientos; mayor tiempo de los usuarios en trámites.',
-];
-function improvePrompt(instr) {
-  const { empty, text } = treeText();
-  return 'Eres tutor del curso de Preparación y Evaluación de Proyectos (PYEP) del Sistema Nacional de Inversiones (SNI) de Chile.\n'
-    + 'Mejora este árbol de problemas siguiendo las guías del SNI y la instrucción del grupo.\n\n'
-    + 'Guías del SNI (Metodología General 2025 y Metodología de Edificación Pública 2024):\n- ' + GUIAS_SNI.join('\n- ') + '\n\n'
-    + 'Instrucción del grupo: ' + (instr.trim() ? '«' + instr.trim() + '»' : 'revisen el árbol completo según las guías.') + '\n\n'
-    + (empty ? 'El árbol está vacío: constrúyelo a partir de la instrucción.' : text) + '\n\n'
-    + 'Reglas de la respuesta:\n'
-    + '- Devuelve el árbol COMPLETO ya mejorado. Conserva el id de cada cuadro que mantengas (aunque cambies su texto); a los cuadros nuevos dales ids "n1", "n2"… Los cuadros que no incluyas se eliminan.\n'
-    + '- Mantén lo que ya cumple las guías; cambia solo lo necesario. No inventes cifras ni datos.\n'
-    + '- Cada flecha va desde lo que provoca hacia lo provocado: causa → problema central → efecto.\n'
-    + '- Enunciados breves, en español de Chile.\n\n'
-    + 'Responde SOLO con un JSON válido, sin texto antes ni después, con este formato:\n'
-    + '{"cuadros": [{"id": "id", "tipo": "central|efecto|causa", "texto": "enunciado"}], "flechas": [{"de": "id", "a": "id"}], "cambios": ["qué cambiaste y por qué, según las guías"]}';
-}
-function readImprove(text) {
-  const j = extractJSON(text);
-  if (!j || Array.isArray(j)) return null;
-  const shown = new Set(Object.values(P.cuadros).filter(n => n.tipo !== 'accion' && n.texto.trim()).map(n => n.id));
-  const bottom = Math.max(0, ...Object.values(P.cuadros).map(n => n.y)) + 200;
-  const next = { meta: clone(P.meta), cuadros: {}, flechas: {} }, ids = new Map(), seen = new Set();
-  let central = null, added = 0, edited = 0;
-  for (const x of arr(j.cuadros || j.nodos).slice(0, 80)) {
-    if (!x || typeof x !== 'object') continue;
-    const key = String(x.id || '').trim(), texto = str(x.texto).replace(/\s+/g, ' ').trim().slice(0, 300);
-    if (!texto || (key && ids.has(key))) continue;
-    const old = shown.has(key) ? P.cuadros[key] : null, id = old ? key : uid();
-    const tipo = !central && /central/i.test(str(x.tipo)) ? 'central' : 'normal';
-    if (key) ids.set(key, id);
-    if (tipo === 'central') central = id;
-    next.cuadros[id] = old ? Object.assign(clone(old), { tipo, texto }) : mkNode(id, tipo, texto, added * (W_NODE + 20), bottom);
-    if (!old) added++; else if (old.texto !== texto) edited++;
-  }
-  if (!central) return null;
-  const link = (de, a) => {
-    if (!de || !a || de === a || !next.cuadros[de] || !next.cuadros[a] || seen.has(de + '>' + a) || seen.has(a + '>' + de)) return;
-    seen.add(de + '>' + a); const id = uid(); next.flechas[id] = { id, de, a };
-  };
-  for (const e of arr(j.flechas)) if (e && typeof e === 'object') link(ids.get(String(e.de || '')), ids.get(String(e.a || '')));
-  // lo que la IA no vio (acciones, cuadros vacíos) se conserva con sus flechas; las acciones que pierden su medio se van
-  for (const n of Object.values(P.cuadros)) if (!shown.has(n.id) && n.tipo !== 'central') next.cuadros[n.id] = clone(n);
-  for (const e of Object.values(P.flechas)) if (!shown.has(e.de) || !shown.has(e.a)) link(e.de, e.a);
-  const linked = new Set(Object.values(next.flechas).flatMap(e => [e.de, e.a]));
-  for (const n of Object.values(next.cuadros)) if (n.tipo === 'accion' && !linked.has(n.id) && Object.values(P.flechas).some(e => e.de === n.id || e.a === n.id)) delete next.cuadros[n.id];
-  const removed = Array.from(shown).filter(id => !next.cuadros[id]).length;
-  return { next, added, edited, removed, total: Object.values(next.cuadros).filter(n => n.tipo !== 'accion').length, cambios: arr(j.cambios || j.observaciones).map(String).filter(Boolean) };
-}
-function applyImprove(res) {
-  tidy(res.next);
-  replaceProject(res.next);
-  view = 'p'; sel = { nodes: new Set(), edge: null };
-  fit(); render();
-  toast('Se mejoró el árbol de problemas con la IA.', { action: 'Deshacer', fn: undo });
-  if (res.cambios.length) modal('Cambios de la IA', [h('p', { class: 'hint' }, 'Revísenlos en grupo: son sugerencias según las guías del SNI, no verdades. Los objetivos de los cuadros que cambiaron quedan marcados para revisar.'), h('ul', null, res.cambios.map(c => h('li', null, c)))], close => [h('button', { type: 'button', class: 'btn primary', onclick: close }, 'Entendido')]);
-}
-function improveDialog() {
-  commitEdit();
-  const instr = h('textarea', { class: 'ta', style: 'min-height:70px;font-family:inherit;font-size:13.5px', 'aria-label': 'Qué quieren mejorar',
-    placeholder: 'Ej.: el problema central está planteado como «falta de un edificio»; corríjanlo. Agreguen efectos sobre los usuarios y los funcionarios. (Si lo dejan vacío, la IA revisa todo según las guías.)' });
-  aiModal({
-    title: 'Mejorar con IA', directLabel: 'Mejorar aquí con Claude', applyLabel: 'Reemplazar el árbol de problemas',
-    intro: 'La IA revisa el árbol de problemas según las guías del SNI (Metodología General y de Edificación Pública) y lo que ustedes le pidan, y lo devuelve completo. Se puede deshacer.',
-    before: h('div', { style: 'display:grid;gap:8px' }, h('h3', null, h('span', { class: 'n' }, '1'), '¿Qué quieren mejorar?'), instr),
-    prompt: () => improvePrompt(instr.value), read: readImprove, apply: applyImprove,
-    summary: r => r.total + ' cuadros: ' + r.added + ' nuevos, ' + r.edited + ' con texto cambiado y ' + r.removed + ' eliminados' + (r.cambios.length ? ', con ' + r.cambios.length + ' explicaciones' : '') + '.',
-    bad: 'No se encontró el árbol en la respuesta (falta el JSON o el problema central). Copien la respuesta completa de la IA.',
-    empty: 'La respuesta no trajo un árbol. Intenten de nuevo.',
+  const prompt = aiPrompt();
+  const promptBox = h('textarea', { class: 'ta short', value: prompt, readOnly: true, 'aria-label': 'Pedido para la IA', onfocus: e => e.target.select() });
+  const answer = h('textarea', { class: 'ta', placeholder: 'Peguen aquí la respuesta completa de la IA', 'aria-label': 'Respuesta de la IA' });
+  const info = h('div', { class: 'hint' });
+  const apply = h('button', { type: 'button', class: 'btn primary', disabled: true }, 'Aplicar al árbol de objetivos');
+  let parsed = null;
+  answer.addEventListener('input', debounce(() => {
+    parsed = readAIAnswer(answer.value);
+    if (!answer.value.trim()) { info.textContent = ''; apply.disabled = true; return; }
+    if (!parsed || !parsed.map.size) { info.textContent = 'No se encontró el JSON con los objetivos. Copien la respuesta completa de la IA.'; info.className = 'hint bad-t'; apply.disabled = true; return; }
+    info.textContent = 'Se reconocieron ' + parsed.map.size + ' de ' + count + ' objetivos' + (parsed.obs.length ? ' y ' + parsed.obs.length + ' observaciones' : '') + '.'; info.className = 'hint ok-t'; apply.disabled = false;
+  }, 200));
+  const directBtn = caps.sample ? h('button', { type: 'button', class: 'btn' }, icon('spark'), h('span', null, 'Transformar aquí con Claude')) : null;
+  modal('Transformar con IA', [
+    h('p', { class: 'hint' }, 'Funciona con ChatGPT, Claude o Gemini en su versión gratuita, sin claves ni configuración. La IA devuelve los objetivos en un formato que esta herramienta lee sola.'),
+    h('h3', null, h('span', { class: 'n' }, '1'), 'Copien el pedido y péguenlo en el chat de la IA'),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onclick: async () => { if (await copyText(prompt)) toast('Pedido copiado. Péguenlo en ChatGPT, Claude o Gemini.'); } }, icon('copy'), 'Copiar pedido'),
+      h('a', { href: 'https://chatgpt.com/', target: '_blank', rel: 'noopener', class: 'hint' }, 'chatgpt.com'), h('a', { href: 'https://claude.ai/new', target: '_blank', rel: 'noopener', class: 'hint' }, 'claude.ai'), h('a', { href: 'https://gemini.google.com/', target: '_blank', rel: 'noopener', class: 'hint' }, 'gemini.google.com')),
+    promptBox,
+    h('h3', null, h('span', { class: 'n' }, '2'), 'Peguen aquí la respuesta'),
+    answer, info,
+    directBtn ? h('div', { class: 'row' }, h('span', { class: 'hint' }, 'O háganlo aquí mismo, con su cuenta de Claude:'), directBtn) : null], close => {
+    apply.onclick = () => { if (!parsed || !parsed.map.size) return; close(); applyAI(parsed); };
+    if (directBtn) directBtn.onclick = async () => {
+      directBtn.disabled = true; directBtn.lastChild.textContent = 'Pensando…';
+      try {
+        const j = await caps.sample.json(prompt, { modelTier: 'default' });
+        const res = readAIAnswer(JSON.stringify(j));
+        if (res && res.map.size) { close(); applyAI(res); } else toast('La respuesta no trajo objetivos. Intenten de nuevo.');
+      } catch (e) {
+        if (e && ['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed'].indexOf(e.code) > -1) caps.sample = null;
+        toast(e && e.code === 'rate_limited' ? 'Demasiadas consultas seguidas; esperen un momento.' : 'No se pudo consultar a Claude aquí. Usen el método de copiar y pegar.');
+      } finally { directBtn.disabled = false; directBtn.lastChild.textContent = 'Transformar aquí con Claude'; }
+    };
+    return [h('button', { type: 'button', class: 'btn', onclick: close }, 'Cancelar'), apply];
   });
 }
 
@@ -1318,10 +1235,10 @@ function showHelp() {
       h('li', null, h('b', null, 'Efectos y causas: '), 'seleccionen un cuadro y hagan clic en ⊕ arriba (efecto) o ⊕ abajo (causa). Arrastren un ⊕ hasta otro cuadro para conectarlos con una flecha.'),
       h('li', null, h('b', null, 'Mover: '), 'arrastren los cuadros. Arrastrar el fondo mueve la vista; Shift + arrastrar selecciona varios. «Ordenar» acomoda todo como árbol.'),
       h('li', null, h('b', null, 'Árbol de objetivos: '), 'pestaña «Objetivos». Se genera solo cambiando cada enunciado por su contrario (alta → baja, insuficiente → suficiente, mal → buen…). Lo amarillo hay que revisarlo: doble clic para corregir.'),
-      h('li', null, h('b', null, 'Mejorar con IA: '), 'escriban qué quieren mejorar; la IA revisa el árbol de problemas según las guías del SNI y lo devuelve completo (se puede deshacer).'),
       h('li', null, h('b', null, 'Transformar con IA: '), 'copia un pedido para ChatGPT, Claude o Gemini y luego pegan la respuesta: la herramienta reemplaza los objetivos por los de la IA (se puede deshacer).'),
       h('li', null, h('b', null, 'Acciones: '), 'en «Objetivos», ⊕ abajo de un medio agrega una acción.'),
-      h('li', null, h('b', null, 'Guardar y compartir: '), Sync.mode === 'shared' ? 'este enlace es el proyecto compartido del grupo: los cambios se guardan solos y se ven en vivo.' : FIREBASE && !caps.inViewer ? 'se guarda solo en este navegador. Para editarlo en grupo y en vivo: Archivo → Trabajar en grupo en vivo, y envíen el enlace.' : 'se guarda solo en este navegador. Para pasarlo al grupo: Archivo → Copiar código, y quien lo recibe usa Archivo → Abrir proyecto.')),
+      h('li', null, h('b', null, 'Google Slides: '), 'Archivo → Copiar para Google Slides dibuja los árboles con formas editables en su presentación.'),
+      h('li', null, h('b', null, 'Guardar y compartir: '), Sync.mode === 'shared' ? 'este enlace es el proyecto compartido del grupo: los cambios se guardan solos y se ven en vivo.' : 'se guarda solo en este navegador. Para pasarlo al grupo: Archivo → Copiar código, y quien lo recibe usa Archivo → Abrir proyecto.')),
     h('p', { class: 'hint' }, h('span', { class: 'kbd' }, 'Supr'), ' eliminar · ', h('span', { class: 'kbd' }, 'Enter'), ' editar · ', h('span', { class: 'kbd' }, 'Ctrl+Z'), ' deshacer · ', h('span', { class: 'kbd' }, 'Ctrl+rueda'), ' zoom · ', h('span', { class: 'kbd' }, 'flechas'), ' mover lo seleccionado')],
     close => [h('button', { type: 'button', class: 'btn primary', onclick: close }, 'Entendido')]);
 }
@@ -1342,13 +1259,9 @@ new MutationObserver(() => render()).observe(document.documentElement, { attribu
 
 function boot() {
   P = loadLocal() || freshProject();
-  const sala = FIREBASE && !caps.inViewer && roomId();
-  if (sala) Sync.ready = false;
   buildBar();
   render();
   requestAnimationFrame(() => { fit(); render(); });
-  if (FIREBASE && !caps.inViewer) window.addEventListener('hashchange', () => location.reload());
-  if (sala) joinRoom(sala, false);
   if (!caps.inViewer) return;
   const use = name => window.claude.use(name).catch(() => null);
   use('downloads').then(d => { caps.downloads = d; });
